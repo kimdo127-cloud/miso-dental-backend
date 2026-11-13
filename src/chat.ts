@@ -135,11 +135,19 @@ export async function answer(patientId: number, question: string): Promise<ChatR
       await save(category === '보험' ? '보험' : '기타', '데스크 대기', null, []);
       return { type: 'handoff', category, answer: '병원 자료에서 답을 찾지 못했어요. 질문을 데스크에 전달했어요. 다음 진료일 아침에 답변을 알림함으로 보내 드릴게요.', sources: [], clinic };
     }
-    const sources: Source[] = dify.resources.slice(0, 3).map((r) => {
-      const m = /\((\d+)쪽\)/.exec(r.content);
-      const h = /^#+\s*(.+)$/m.exec(r.content);
-      return { chunkId: 0, document: r.document_name.replace(/\.(md|txt|pdf)$/i, '').replace(/^\d+_/, ''), edition: 2026, page: m ? Number(m[1]) : 0, heading: h ? h[1].replace(/\(\d+쪽\)/, '').trim() : '', excerpt: r.content.replace(/^#+.*$/m, '').trim() };
+    // 근거: 질문한 시술의 자료만 (다른 시술 자료가 섞여 검색돼도 근거로 보여 주지 않음)
+    const proc = await detectProcedure(question);
+    const parsed = dify.resources.map((r: any) => {
+      const t = String(r.content || '').replace(/^#+\s*/, '').trim();
+      const m = /^(?:(주의사항|보험 기준)\s*·\s*)?(?:\[([^\]]+)\]\s*)?(.*?)\s*\((\d+)쪽\)\s*([\s\S]*)$/.exec(t);
+      return {
+        proc: m?.[2] || '', score: Number(r.score || 0),
+        source: { chunkId: 0, document: m?.[1] === '보험 기준' ? '치과 건강보험 적용 기준 안내 2026년 판 (가상)' : '시술 후 주의사항 안내 2026년 판 (가상)', edition: 2026, page: m ? Number(m[4]) : 0, heading: m ? m[3] : '', excerpt: m ? m[5].trim() : t },
+      };
     });
+    let picked = proc ? parsed.filter((x: any) => x.proc === proc.name) : [];
+    if (!picked.length) picked = parsed.slice(0, 1);
+    const sources: Source[] = picked.slice(0, 1).map((x: any) => x.source);
     let text = dify.answer;
     if (category === '보험' && !/데스크/.test(text)) text += ' 올해 이미 혜택을 받았는지 같은 개인별 적용 여부는 병원 데스크에서 확인해 드려요.';
     await save(category, 'AI 답변', text, []);
