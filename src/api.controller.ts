@@ -73,15 +73,15 @@ export class ApiController {
     const phone = digits(b?.phone);
     const name = (b?.name || '').trim();
     if (phone.length < 10 || !name) throw new BadRequestException('휴대폰 번호와 이름을 입력해 주세요.');
-    // 이름은 본인 또는 아이 중 한 명 (보호자가 아이 이름으로 확인해도 됨)
-    const rows = await q<{ id: number }>(`select id from patients where (phone = $1 or guardian_phone = $1) and name = $2`, [phone, name]);
+    // 로그인하는 사람은 휴대폰 주인(부모). 아이 이름으로는 로그인하지 않음
+    const rows = await q<{ id: number }>(`select id from patients where phone = $1 and name = $2`, [phone, name]);
     if (!rows.length) throw new NotFoundException(`등록된 환자 정보를 찾지 못했어요. 병원(${CLINIC.phone})으로 연락 주세요.`);
     const token = jwt.sign({ phone, role: 'patient' }, SECRET, { expiresIn: '7d' });
     return { token, profiles: await this.profilesOf(phone) };
   }
 
   private async profilesOf(phone: string) {
-    return (await family(phone)).map((f) => ({ id: f.id, name: f.name, age: f.age, isChild: f.is_child }));
+    return (await family(phone)).map((f) => ({ id: f.id, name: f.name, age: f.age, isChild: f.is_child, isOwner: f.phone === phone }));
   }
 
   // "누구 진료인가요?" 고르기: 본인과 보호자 번호로 연결된 아이들
@@ -91,18 +91,20 @@ export class ApiController {
 
   // P2 홈
   @Get('me') async me(@Headers('authorization') auth: string, @Headers('x-patient-id') pid: string) {
-    const { id, ids } = await target(auth, pid);
+    const { id, ids, phone } = await target(auth, pid);
+    const [owner] = await q<any>(`select name from patients where phone=$1`, [phone]);
     const [p] = await q<any>(`select id,name,birth_date,guardian_phone,last_checkup_at,checkup_cycle_months,
         (last_checkup_at + make_interval(months => checkup_cycle_months))::date::text as next_checkup_due from patients where id=$1`, [id]);
     const [next] = await q<any>(`select a.id,a.start_at,a.end_at,a.confirm_status,p.name procedure from appointments a join procedures p on p.id=a.procedure_id
         where a.patient_id=$1 and a.status='예약' and a.start_at > now() order by a.start_at limit 1`, [id]);
     const [{ unread }] = await q<any>(`select count(*)::int unread from notifications where patient_id = any($1) and read_at is null`, [ids]);
     const isChild = p.guardian_phone != null;
+    const [{ n: hasCheckup }] = await q<any>(`select count(*)::int n from appointments a join procedures p on p.id=a.procedure_id where a.patient_id=$1 and a.status='예약' and a.start_at > now() and p.name='정기 검진'`, [id]);
     // 가족 전체의 다가오는 예약 (보호자가 아이들 예약을 한눈에)
     const familyUpcoming = await q<any>(`select a.id,a.start_at,a.confirm_status,p.name procedure,pt.id patient_id,pt.name patient from appointments a
         join procedures p on p.id=a.procedure_id join patients pt on pt.id=a.patient_id
         where a.patient_id = any($1) and a.status='예약' and a.start_at > now() order by a.start_at limit 10`, [ids]);
-    return { id, name: p.name, isChild, nextAppointment: next || null, familyUpcoming, unread, nextCheckupDue: p.next_checkup_due, checkupOverdue: !!p.next_checkup_due && p.next_checkup_due <= kstDate() };
+    return { id, ownerName: owner?.name ?? null, name: p.name, isChild, nextAppointment: next || null, familyUpcoming, unread, nextCheckupDue: p.next_checkup_due, checkupOverdue: !!p.next_checkup_due && p.next_checkup_due <= kstDate() && !hasCheckup };
   }
 
   // P4 내 예약
