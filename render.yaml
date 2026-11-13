@@ -4,7 +4,7 @@ services:
     name: miso-dental-backend
     runtime: node
     plan: free
-    region: singapore
+    region: virginia  # 기존 DB와 같은 지역
     buildCommand: npm install --include=dev && npm run build
     startCommand: npm start
     healthCheckPath: /api/health
