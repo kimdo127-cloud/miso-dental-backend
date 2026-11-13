@@ -135,11 +135,18 @@ export class ApiController {
     const today = kstDate();
     if (date < today || date > addDays(today, 30)) return [];
     const nowMin = kstParts().min;
+    // 그날 예약을 한 번에 읽어 의자별로 비는 시간을 계산 (시간칸마다 DB를 부르지 않음)
+    const busy = await q<{ chair_id: number; s: number; e: number }>(
+      `select chair_id, extract(epoch from start_at)::bigint s, extract(epoch from end_at)::bigint e from appointments
+        where status='예약' and start_at < $2 and end_at > $1`, [kstAt(date, 0, 0), kstAt(addDays(date, 1), 0, 0)]);
+    const chairs = (await q<{ id: number }>(`select id from chairs`)).map((c) => c.id);
+    const base = Date.parse(kstAt(date, 0, 0)) / 1000;
     const out = [];
     for (const t of openSlots(date, p.duration_min)) {
       if (date === today && t <= nowMin + 60) continue;
-      const free = await freeChairs(kstAt(date, 0, t), kstAt(date, 0, t + p.duration_min));
-      out.push({ time: `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`, available: free.length > 0 });
+      const s0 = base + t * 60, e0 = s0 + p.duration_min * 60;
+      const free = chairs.some((c) => !busy.some((b) => b.chair_id === c && Number(b.s) < e0 && Number(b.e) > s0));
+      out.push({ time: `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`, available: free });
     }
     return out;
   }
