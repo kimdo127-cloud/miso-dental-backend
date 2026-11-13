@@ -10,7 +10,10 @@ let runner: Promise<Runner> | null = null;
 async function makeRunner(): Promise<Runner> {
   if (process.env.DATABASE_URL) {
     const { Pool } = await import('pg');
-    const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: process.env.DATABASE_URL.includes('localhost') ? undefined : { rejectUnauthorized: false } });
+    // 같은 DB를 다른 과제와 함께 쓰므로 미소치과 테이블은 별도 스키마(DB_SCHEMA, 기본 miso)에만 둔다
+    const schema = (process.env.DB_SCHEMA || 'miso').replace(/[^a-z0-9_]/gi, '');
+    const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: process.env.DATABASE_URL.includes('localhost') ? undefined : { rejectUnauthorized: false }, options: `-c search_path=${schema},public` });
+    await pool.query(`create schema if not exists ${schema}`);
     return {
       query: async (sql, params) => (await pool.query(sql, params)).rows,
       exec: async (sql) => { await pool.query(sql); },

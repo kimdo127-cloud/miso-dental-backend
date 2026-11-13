@@ -1,6 +1,6 @@
 // ERD(테이블 10개)와 같은 구조. 같은 의자 시간 겹침은 DB가 막는다(EXCLUDE).
 export const SCHEMA = `
-create extension if not exists btree_gist;
+create extension if not exists btree_gist schema public;
 
 create table if not exists patients (
   id serial primary key,

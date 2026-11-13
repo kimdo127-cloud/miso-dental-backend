@@ -2,6 +2,7 @@ import { getDb, q } from './db';
 import { SCHEMA } from './schema';
 import { PROCEDURES, AFTERCARE, INSURANCE, LAST_NAMES, FIRST_NAMES } from './content';
 import { kstDate, kstAt, addDays } from '../time';
+import { hashPassword } from '../password';
 
 // 시연용 가상 데이터. 실행할 때마다 처음 상태로 되돌린다.
 let seed = 42;
@@ -11,14 +12,18 @@ const pick = <T>(a: T[]) => a[Math.floor(rnd() * a.length)];
 export async function resetAndSeed() {
   seed = 42;
   const db = await getDb();
-  await db.exec(`drop table if exists notifications, chat_questions, document_chunks, documents, treatments, appointments, procedures, chairs, staff, patients cascade;`);
+  // 지금 스키마(배포: miso, 로컬: public)의 테이블만 지운다. 같은 DB의 다른 과제 테이블은 건드리지 않음
+  const [{ s: sch }] = await q<{ s: string }>(`select current_schema() s`);
+  if (process.env.DATABASE_URL && sch === 'public') throw new Error('배포 DB에서는 public 스키마를 초기화하지 않아요. DB_SCHEMA를 확인하세요.');
+  const T = ['notifications', 'chat_questions', 'document_chunks', 'documents', 'treatments', 'appointments', 'procedures', 'chairs', 'staff', 'patients'];
+  await db.exec(`drop table if exists ${T.map((t) => `"${sch}".${t}`).join(', ')} cascade;`);
   await db.exec(SCHEMA);
 
   for (let i = 1; i <= 5; i++) await q(`insert into chairs(name) values ($1)`, [`${i}번 의자`]);
   for (const p of PROCEDURES) await q(`insert into procedures(name,duration_min,supplies,needs_checkup,keywords) values ($1,$2,$3,$4,$5)`, [p.name, p.min, p.supplies, p.checkup, p.keywords]);
   const staff: [string, string, string][] = [['박대표', '원장', 'ceo@miso.test'], ['최부원', '원장', 'vice@miso.test'], ['한실장', '데스크', 'desk1@miso.test'], ['이주임', '데스크', 'desk2@miso.test'],
     ['정위생', '위생사', 'hyg1@miso.test'], ['강위생', '위생사', 'hyg2@miso.test'], ['조위생', '위생사', 'hyg3@miso.test'], ['윤위생', '위생사', 'hyg4@miso.test']];
-  for (const s of staff) await q(`insert into staff(name,role,email) values ($1,$2,$3)`, s);
+  for (const s of staff) await q(`insert into staff(name,role,email,password_hash) values ($1,$2,$3,$4)`, [...s, hashPassword('miso1234')]); // 시연용 비밀번호
 
   const procs = await q<{ id: number; name: string; duration_min: number }>(`select id,name,duration_min from procedures order by id`);
   const pid = (n: string) => procs.find((p) => p.name === n)!.id;
@@ -68,6 +73,9 @@ export async function resetAndSeed() {
   const ka = await q<{ id: number }>(`insert into appointments(patient_id,chair_id,procedure_id,start_at,end_at,source,status,confirm_status) values ($1,3,$2,$3,$4,'전화','완료','확인') returning id`, [kid2[0].id, pid('정기 검진'), kstAt(addDays(today, -100), 11, 0), kstAt(addDays(today, -100), 11, 30)]);
   await q(`insert into treatments(appointment_id,patient_id,procedure_id,doctor_id,hygienist_id,treated_at,record_note) values ($1,$2,$3,2,6,$4,'유치 우식 관찰, 불소 도포')`, [ka[0].id, kid2[0].id, pid('정기 검진'), addDays(today, -100)]);
   await q(`insert into notifications(patient_id,kind,title,body) values ($1,'검진 안내','하준이 정기 검진 시기가 됐어요','마지막 검진 후 6개월이 지났어요. 충치 치료 오실 때 함께 받아도 돼요.')`, [kid[0].id]);
+
+  // 밤사이 쌓인 문의 (데스크 대기)
+  await q(`insert into chat_questions(patient_id,question,category,status,asked_at) values ($1,'주차장 있어요?','기타','데스크 대기',now() - interval '10 hours'),($1,'사랑니 실밥은 언제 빼러 가요? 예약해야 하나요?','주의사항','데스크 대기',now() - interval '9 hours'),($2,'아이 불소 도포도 보험 되나요?','보험','데스크 대기',now() - interval '8 hours')`, [demo[0].id, kid[0].id]);
 
   // 앞으로 2주 예약 (의자별로 겹치지 않게 채움)
   const others = await q<{ id: number }>(`select id from patients where id > $1 order by id limit 400`, [kid2[0].id]);

@@ -1,0 +1,33 @@
+# Render 블루프린트: 미소치과 백엔드 (DB는 기존 Render PostgreSQL의 miso 스키마를 함께 씀)
+services:
+  - type: web
+    name: miso-dental-backend
+    runtime: node
+    plan: free
+    region: singapore
+    buildCommand: npm install --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: DB_SCHEMA
+        value: miso
+      - key: JWT_SECRET
+        generateValue: true
+      - key: CORS_ORIGINS
+        sync: false
+      - key: ALLOW_RESET
+        value: "false"
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        value: gpt-4o-mini
+      - key: DIFY_API_KEY
+        sync: false
+      - key: DIFY_API_URL
+        value: https://api.dify.ai/v1
+      - key: DIFY_DATASET_ID
+        value: 63854634-d42e-4d17-b93e-fede18975b20
+      - key: TZ
+        value: Asia/Seoul
