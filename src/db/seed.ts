@@ -105,3 +105,27 @@ export async function resetAndSeed() {
 }
 
 if (require.main === module) resetAndSeed().then(() => process.exit(0)).catch((e) => { console.error(e); process.exit(1); });
+
+// 시연 보호자(박지연)와 하준이의 받은 시술이 비어 있으면 채움 (이미 있으면 그대로)
+export async function ensureDemoTreatments() {
+  const today = kstDate();
+  const rows: [string, string, number, string, number][] = [
+    // [환자 휴대폰/보호자 구분용 이름, 시술, 며칠 전, 기록, 의자]
+    ['박지연', '스케일링', -90, '전악 스케일링, 치석 중등도', 4],
+    ['박지연', '크라운', -45, '상악 우측 제1대구치 지르코니아 크라운 장착', 4],
+    ['이하준', '정기 검진', -200, '유치 우식 2개소 관찰, 불소 도포', 5],
+    ['이하준', '충치 치료(레진)', -150, '하악 좌측 유구치 레진 충전', 5],
+  ];
+  for (const [name, proc, d, note, chair] of rows) {
+    const [p] = await q<{ id: number }>(`select id from patients where name = $1 and (phone = '01055556666' or guardian_phone = '01055556666')`, [name]);
+    const [pr] = await q<{ id: number; duration_min: number }>(`select id, duration_min from procedures where name = $1`, [proc]);
+    if (!p || !pr) continue;
+    const day = addDays(today, d);
+    const has = await q(`select 1 from treatments where patient_id = $1 and procedure_id = $2 and treated_at = $3`, [p.id, pr.id, day]);
+    if (has.length) continue;
+    const a = await q<{ id: number }>(`insert into appointments(patient_id,chair_id,procedure_id,start_at,end_at,source,status,confirm_status) values ($1,$2,$3,$4,$5,'전화','완료','확인') returning id`,
+      [p.id, chair, pr.id, kstAt(day, 9, 30), kstAt(day, 9, 30 + pr.duration_min)]).catch(() => []);
+    if (!a.length) continue;
+    await q(`insert into treatments(appointment_id,patient_id,procedure_id,doctor_id,hygienist_id,treated_at,record_note) values ($1,$2,$3,1,5,$4,$5)`, [a[0].id, p.id, pr.id, day, note]);
+  }
+}

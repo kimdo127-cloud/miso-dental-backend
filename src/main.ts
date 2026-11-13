@@ -5,7 +5,7 @@ import { NestFactory } from '@nestjs/core';
 import { ApiController } from './api.controller';
 import { AdminController } from './admin.controller';
 import { q } from './db/db';
-import { resetAndSeed } from './db/seed';
+import { resetAndSeed, ensureDemoTreatments } from './db/seed';
 
 @Module({ controllers: [ApiController, AdminController] })
 class AppModule {}
@@ -14,6 +14,7 @@ async function bootstrap() {
   // 테이블이 없으면 가상 데이터로 처음 상태를 만든다
   const [t] = await q<{ n: number }>(`select count(*)::int n from information_schema.tables where table_name = 'patients' and table_schema = current_schema()`);
   if (!t.n) await resetAndSeed();
+  await ensureDemoTreatments().catch((e) => console.error('demo treatments', e));
 
   const app = await NestFactory.create(AppModule);
   app.setGlobalPrefix('api');
