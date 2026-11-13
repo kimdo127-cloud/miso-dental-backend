@@ -17,7 +17,10 @@ async function bootstrap() {
 
   const app = await NestFactory.create(AppModule);
   app.setGlobalPrefix('api');
-  app.enableCors({ origin: (process.env.CORS_ORIGINS || 'http://localhost:3300,http://localhost:3400').split(','), allowedHeaders: ['Content-Type', 'Authorization', 'X-Patient-Id'] });
+  const allowed = (process.env.CORS_ORIGINS || 'http://localhost:3300,http://localhost:3400').split(',');
+  // 미소치과 웹앱 · 어드민 배포 주소 (Render · Vercel)
+  const ours = /^https:\/\/miso-dental-(web|admin)[a-z0-9-]*\.(onrender\.com|vercel\.app)$/;
+  app.enableCors({ origin: (o: string | undefined, cb: (e: Error | null, ok?: boolean) => void) => cb(null, !o || allowed.includes(o) || ours.test(o)), allowedHeaders: ['Content-Type', 'Authorization', 'X-Patient-Id'] });
   const port = Number(process.env.PORT || 4100);
   await app.listen(port);
   console.log(`miso backend http://localhost:${port}/api`);
