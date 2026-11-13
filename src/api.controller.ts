@@ -89,6 +89,23 @@ export class ApiController {
     return this.profilesOf(loginPhone(auth));
   }
 
+  // 아이 등록: 보호자(휴대폰 주인)가 직접 등록. 본인 이름 재확인 + 법정대리인 동의 필수, 만 19세 미만만
+  @Post('patient/children') async addChild(@Headers('authorization') auth: string, @Body() b: { name: string; birthDate: string; guardianName: string; consent: boolean }) {
+    const phone = loginPhone(auth);
+    const name = (b?.name || '').trim();
+    const birth = (b?.birthDate || '').trim();
+    if (!name || !/^\d{4}-\d{2}-\d{2}$/.test(birth)) throw new BadRequestException('아이 이름과 생년월일을 입력해 주세요.');
+    if (!b?.consent) throw new BadRequestException('법정대리인 동의가 필요해요.');
+    const [owner] = await q<{ name: string }>(`select name from patients where phone = $1`, [phone]);
+    if (!owner || owner.name !== (b?.guardianName || '').trim()) throw new ForbiddenException('보호자 본인 확인이 맞지 않아요. 휴대폰 주인 이름을 다시 입력해 주세요.');
+    const [age] = await q<{ y: number }>(`select date_part('year', age(current_date, $1::date))::int y`, [birth]);
+    if (!age || age.y < 0 || age.y >= 19) throw new BadRequestException('만 19세 미만 아이만 보호자 번호로 등록할 수 있어요.');
+    const dup = await q(`select 1 from patients where guardian_phone = $1 and name = $2 and birth_date = $3`, [phone, name, birth]);
+    if (dup.length) throw new ConflictException('이미 등록된 아이예요.');
+    const [row] = await q<{ id: number }>(`insert into patients (name, birth_date, guardian_phone) values ($1, $2, $3) returning id`, [name, birth, phone]);
+    return { id: row.id, profiles: await this.profilesOf(phone) };
+  }
+
   // P2 홈
   @Get('me') async me(@Headers('authorization') auth: string, @Headers('x-patient-id') pid: string) {
     const { id, ids, phone } = await target(auth, pid);
